@@ -80,9 +80,11 @@ class InstallerContract(unittest.TestCase):
 
     def test_low_memory_swap(self):
         self.assertIn('ensure_build_swap()', SCRIPT)
-        self.assertIn('fallocate -l 2G /swapfile', SCRIPT)
-        self.assertIn('chmod 600 /swapfile', SCRIPT)
-        self.assertIn('swapon /swapfile', SCRIPT)
+        self.assertIn('build_swap="$STATE_DIR/build.swap"', SCRIPT)
+        self.assertIn('fallocate -l 2G "$build_swap"', SCRIPT)
+        self.assertIn('chmod 600 "$build_swap"', SCRIPT)
+        self.assertIn('swapon "$build_swap"', SCRIPT)
+        self.assertIn('Never modify or reformat it', SCRIPT)
         self.assertIn('export CARGO_BUILD_JOBS=1', SCRIPT)
         self.assertIn('Less than 6 GiB disk space free', SCRIPT)
 
