@@ -188,7 +188,17 @@ fi
 [[ $(git -C "$UPSTREAM_DIR" remote get-url origin) == "$REPO" ]] || fail 'Unexpected upstream origin URL.'
 if [[ $(git -C "$UPSTREAM_DIR" rev-parse HEAD 2>/dev/null || true) != "$UPSTREAM_COMMIT" ]]; then
   log 'Fetching pinned upstream commit (safe to retry)'
-  git -C "$UPSTREAM_DIR" fetch --depth 1 origin "$UPSTREAM_COMMIT"
+  # Network/DNS may not be ready immediately after the first reboot.
+  FETCH_OK=false
+  for attempt in $(seq 1 6); do
+    if git -C "$UPSTREAM_DIR" fetch --depth 1 origin "$UPSTREAM_COMMIT"; then
+      FETCH_OK=true
+      break
+    fi
+    log "Upstream fetch attempt $attempt/6 failed; retrying after network settles"
+    sleep 10
+  done
+  [[ $FETCH_OK == true ]] || fail 'Cannot fetch pinned upstream after six attempts; check DNS and HTTPS connectivity.'
   git -C "$UPSTREAM_DIR" checkout -q --detach FETCH_HEAD
 fi
 [[ $(git -C "$UPSTREAM_DIR" rev-parse HEAD) == "$UPSTREAM_COMMIT" ]] || fail 'Upstream checkout SHA mismatch.'
@@ -290,6 +300,20 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl enable --now nginx
 systemctl reload nginx
+# Validate that the nginx worker can actually read the HTTP-01 webroot.
+# umask 077 is retained for secrets; only this test file is world-readable.
+ACME_PROBE=$(mktemp /var/www/html/.well-known/acme-challenge/awg31-probe.XXXXXXXX)
+printf 'awg31-acme-ok\n' > "$ACME_PROBE"
+chmod 644 "$ACME_PROBE"
+ACME_PROBE_URL="http://127.0.0.1/.well-known/acme-challenge/${ACME_PROBE##*/}"
+ACME_PROBE_RESULT=$(curl --noproxy '*' -fsS --max-time 10 -H "Host: $PUBLIC_IP" "$ACME_PROBE_URL") || {
+  rm -f "$ACME_PROBE"
+  fail 'Local ACME HTTP challenge preflight failed: inspect nginx permissions and configuration.'
+}
+rm -f "$ACME_PROBE"
+[[ $ACME_PROBE_RESULT == awg31-acme-ok ]] ||
+  fail 'Local ACME challenge returned unexpected content.'
+log 'ACME HTTP challenge webroot preflight passed'
 
 log 'Installing recent Certbot via snap'
 systemctl enable --now snapd.socket
