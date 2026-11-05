@@ -24,6 +24,9 @@ class InstallerContract(unittest.TestCase):
         self.assertIn("PasswordHasher().hash", SCRIPT)
         self.assertIn('rm -f "$CONFIG"', SCRIPT)
 
+    def test_acme_challenge_directory_permissions(self):
+        self.assertIn("chmod 755 /var/www/html/.well-known /var/www/html/.well-known/acme-challenge", SCRIPT)
+
     def test_panel_readiness_after_restart(self):
         self.assertIn("PANEL_READY=false", SCRIPT)
         self.assertIn("for attempt in $(seq 1 30)", SCRIPT)
