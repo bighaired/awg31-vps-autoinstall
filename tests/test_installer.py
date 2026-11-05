@@ -53,9 +53,9 @@ class InstallerContract(unittest.TestCase):
 
     def test_padding_extraction_samples(self):
         # Execute the same sed parser on representative generated configs.
-        pattern = r"s/^[[:space:]]*S4[[:space:]]*=[[:space:]]*([0-9]+)[[:space:]]*$/\\1/p"
+        pattern = r"s/^[[:space:]]*S4[[:space:]]*=[[:space:]]*([0-9]+)[[:space:]]*$/\1/p"
         for value in (15, 54, 128):
-            config = f"[Interface]\\nS1 = 55\\nS4 = {value}\\n"
+            config = f"[Interface]\nS1 = 55\nS4 = {value}\n"
             out = subprocess.run(["sed", "-nE", pattern], input=config, text=True,
                                  capture_output=True, check=True)
             self.assertEqual(out.stdout.strip(), str(value))
@@ -63,8 +63,8 @@ class InstallerContract(unittest.TestCase):
     def test_socket_parser_samples(self):
         # ss -H emits State, Recv-Q, Send-Q, Local Address:Port, Peer Address:Port.
         cmd = ["awk", "-v", "port=585", '$4 ~ (":" port "$") { found=1 } END { exit !found }']
-        good = "UNCONN 0 0 0.0.0.0:585 0.0.0.0:*\\n"
-        bad = "UNCONN 0 0 0.0.0.0:1585 0.0.0.0:*\\n"
+        good = "UNCONN 0 0 0.0.0.0:585 0.0.0.0:*\n"
+        bad = "UNCONN 0 0 0.0.0.0:1585 0.0.0.0:*\n"
         self.assertEqual(subprocess.run(cmd, input=good, text=True).returncode, 0)
         self.assertNotEqual(subprocess.run(cmd, input=bad, text=True).returncode, 0)
 
