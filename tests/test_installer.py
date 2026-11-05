@@ -23,6 +23,13 @@ class InstallerContract(unittest.TestCase):
         self.assertIn("PasswordHasher().hash", SCRIPT)
         self.assertIn('rm -f "$CONFIG"', SCRIPT)
 
+    def test_partial_panel_install_recovery(self):
+        self.assertIn('Installing or repairing incomplete web panel', SCRIPT)
+        self.assertIn('! -x /usr/local/bin/amneziawg-web', SCRIPT)
+        self.assertIn('! -f /etc/systemd/system/amneziawg-web.service', SCRIPT)
+        self.assertIn('Web panel installation incomplete.', SCRIPT)
+        self.assertIn('AWG_WEB_LISTEN=127.0.0.1:8080', SCRIPT)
+
     def test_panel_localhost_and_tls(self):
         self.assertIn('--host 127.0.0.1 --port 8080', SCRIPT)
         self.assertIn('AUTH_SECURE_COOKIE=true', SCRIPT)
@@ -33,6 +40,8 @@ class InstallerContract(unittest.TestCase):
         self.assertIn("Fetching pinned upstream commit (safe to retry)", SCRIPT)
         self.assertIn('git -C "$UPSTREAM_DIR" fetch --depth 1', SCRIPT)
         self.assertIn('Unexpected upstream origin URL', SCRIPT)
+        self.assertIn('remote add origin "$REPO"', SCRIPT)
+        self.assertIn('if ! git -C "$UPSTREAM_DIR" remote get-url origin', SCRIPT)
 
     def test_listener_socket_checks(self):
         self.assertIn('ss -H -lun | awk -v port="$AWG_PORT"', SCRIPT)
