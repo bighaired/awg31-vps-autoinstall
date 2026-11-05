@@ -113,6 +113,9 @@ if [[ ! -d $UPSTREAM_DIR/.git ]]; then
   [[ ! -e $UPSTREAM_DIR ]] || fail 'Non-git upstream directory exists; inspect manually.'
   mkdir -p "$UPSTREAM_DIR"
   git -C "$UPSTREAM_DIR" init -q
+fi
+# An interrupted init may have created .git before 'remote add origin'.
+if ! git -C "$UPSTREAM_DIR" remote get-url origin >/dev/null 2>&1; then
   git -C "$UPSTREAM_DIR" remote add origin "$REPO"
 fi
 [[ $(git -C "$UPSTREAM_DIR" remote get-url origin) == "$REPO" ]] || fail 'Unexpected upstream origin URL.'
@@ -160,14 +163,22 @@ systemctl restart awg-quick@awg0
 systemctl is-active --quiet awg-quick@awg0 || fail 'AWG service inactive'
 
 log 'Installing web control panel'
-if [[ ! -f /etc/amneziawg-web/env.conf ]]; then
-  # The web installer is sourced from the same pinned checkout as core AWG.
+# Restart/resume partial panel installation even if env.conf was written before failure.
+# Upstream non-interactive mode preserves an existing env file unless --force is set.
+if [[ ! -s /etc/amneziawg-web/env.conf ||
+      ! -x /usr/local/bin/amneziawg-web ||
+      ! -f /etc/systemd/system/amneziawg-web.service ]]; then
+  log 'Installing or repairing incomplete web panel'
   bash /opt/awg-server-tools/amneziawg-web.sh install \
     --non-interactive --install-rust \
     --source-dir /opt/awg-server-tools/amneziawg-web \
     --username "$ADMIN_USER" --password-hash "$ADMIN_HASH" \
     --host 127.0.0.1 --port 8080
 fi
+[[ -s /etc/amneziawg-web/env.conf &&
+   -x /usr/local/bin/amneziawg-web &&
+   -f /etc/systemd/system/amneziawg-web.service ]] || fail 'Web panel installation incomplete.'
+grep -Fxq 'AWG_WEB_LISTEN=127.0.0.1:8080' /etc/amneziawg-web/env.conf || fail 'Web panel listen address differs from expected localhost bind.'
 if grep -q '^AUTH_SECURE_COOKIE=' /etc/amneziawg-web/env.conf; then
   sed -i 's/^AUTH_SECURE_COOKIE=.*/AUTH_SECURE_COOKIE=true/' /etc/amneziawg-web/env.conf
 else
