@@ -91,8 +91,8 @@ PY
   prompt_input ADMIN_USER 'Web panel username [admin]: '
   ADMIN_USER=${ADMIN_USER:-admin}
   [[ $ADMIN_USER =~ ^[a-zA-Z0-9_.-]{1,32}$ ]] || fail 'Invalid username'
-  prompt_secret ADMIN_PASS 'Web panel password (min 16 characters): '
-  [[ ${#ADMIN_PASS} -ge 16 ]] || fail 'Password too short.'
+  prompt_secret ADMIN_PASS 'Web panel password (min 6 characters): '
+  [[ ${#ADMIN_PASS} -ge 6 ]] || fail 'Password too short.'
   prompt_secret ADMIN_PASS_2 'Repeat password: '
   [[ $ADMIN_PASS == "$ADMIN_PASS_2" ]] || fail 'Passwords do not match.'
   unset ADMIN_PASS_2
