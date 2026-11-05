@@ -24,6 +24,17 @@ class InstallerContract(unittest.TestCase):
         self.assertIn("PasswordHasher().hash", SCRIPT)
         self.assertIn('rm -f "$CONFIG"', SCRIPT)
 
+    def test_upstream_fetch_network_retries(self):
+        self.assertIn("for attempt in $(seq 1 6)", SCRIPT)
+        self.assertIn("FETCH_OK=false", SCRIPT)
+        self.assertIn("Cannot fetch pinned upstream after six attempts", SCRIPT)
+
+    def test_acme_local_http_probe(self):
+        self.assertIn("ACME_PROBE=$(mktemp /var/www/html/.well-known/acme-challenge/", SCRIPT)
+        self.assertIn('chmod 644 "$ACME_PROBE"', SCRIPT)
+        self.assertIn("ACME HTTP challenge webroot preflight passed", SCRIPT)
+        self.assertIn("curl --noproxy '*' -fsS --max-time 10", SCRIPT)
+
     def test_acme_challenge_directory_permissions(self):
         self.assertIn("chmod 755 /var/www/html/.well-known /var/www/html/.well-known/acme-challenge", SCRIPT)
 
