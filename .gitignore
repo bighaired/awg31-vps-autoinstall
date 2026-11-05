@@ -1,0 +1,24 @@
+# Never commit VPN secrets or deployed configuration
+*.conf
+*.conf.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.sqlite
+*.sqlite3
+*.db
+*.db-*
+*.log
+.env
+.env.*
+awg-vars
+client*.json
+clients/
+secrets/
+backups/
+*.bak
+*.bak.*
+.DS_Store
+__pycache__/
+.pytest_cache/
