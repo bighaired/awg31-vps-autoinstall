@@ -103,16 +103,21 @@ export DEBIAN_FRONTEND=noninteractive
 log 'Resuming installation after reboot'
 [[ -e /lib/modules/$(uname -r)/build ]] || fail "Headers missing for running kernel $(uname -r)"
 cd /root
-# Freeze both the core installer and panel installer to one reviewed upstream revision.
-if [[ ! -d /opt/awg-server-tools/.git ]]; then
-  [[ ! -e /opt/awg-server-tools ]] || fail 'Non-git /opt/awg-server-tools exists; inspect manually.'
-  mkdir -p /opt/awg-server-tools
-  git -C /opt/awg-server-tools init -q
-  git -C /opt/awg-server-tools remote add origin "$REPO"
-  git -C /opt/awg-server-tools fetch --depth 1 origin "$UPSTREAM_COMMIT"
-  git -C /opt/awg-server-tools checkout -q --detach FETCH_HEAD
+# Resume safely if a prior git fetch/checkout was interrupted.
+UPSTREAM_DIR=/opt/awg-server-tools
+if [[ ! -d $UPSTREAM_DIR/.git ]]; then
+  [[ ! -e $UPSTREAM_DIR ]] || fail 'Non-git upstream directory exists; inspect manually.'
+  mkdir -p "$UPSTREAM_DIR"
+  git -C "$UPSTREAM_DIR" init -q
+  git -C "$UPSTREAM_DIR" remote add origin "$REPO"
 fi
-[[ $(git -C /opt/awg-server-tools rev-parse HEAD) == "$UPSTREAM_COMMIT" ]] || fail 'Upstream checkout SHA mismatch.'
+[[ $(git -C "$UPSTREAM_DIR" remote get-url origin) == "$REPO" ]] || fail 'Unexpected upstream origin URL.'
+if [[ $(git -C "$UPSTREAM_DIR" rev-parse HEAD 2>/dev/null || true) != "$UPSTREAM_COMMIT" ]]; then
+  log 'Fetching pinned upstream commit (safe to retry)'
+  git -C "$UPSTREAM_DIR" fetch --depth 1 origin "$UPSTREAM_COMMIT"
+  git -C "$UPSTREAM_DIR" checkout -q --detach FETCH_HEAD
+fi
+[[ $(git -C "$UPSTREAM_DIR" rev-parse HEAD) == "$UPSTREAM_COMMIT" ]] || fail 'Upstream checkout SHA mismatch.'
 [[ -f /opt/awg-server-tools/amneziawg-install.sh && -f /opt/awg-server-tools/amneziawg-web.sh ]] || fail 'Pinned upstream files missing.'
 # Deliberately refresh the local lifecycle installer from the pinned checkout.
 install -m 700 /opt/awg-server-tools/amneziawg-install.sh /root/amneziawg-install.sh
@@ -130,17 +135,21 @@ AWG_CONF=/etc/amnezia/amneziawg/awg0.conf
 [[ -f $PARAMS && -f $AWG_CONF ]] || fail 'AWG configuration missing.'
 [[ -e "$PARAMS.pre-autosetup.bak" ]] || cp -a "$PARAMS" "$PARAMS.pre-autosetup.bak"
 [[ -e "$AWG_CONF.pre-autosetup.bak" ]] || cp -a "$AWG_CONF" "$AWG_CONF.pre-autosetup.bak"
+# Preserve the originally generated S4: upstream used it to compute server/client MTU.
+# Changing S4 here could cause fragmentation or stale CLIENT_MTU defaults.
+S_VALUE=$(sed -nE 's/^[[:space:]]*S4[[:space:]]*=[[:space:]]*([0-9]+)[[:space:]]*$/\1/p' "$AWG_CONF")
+[[ $S_VALUE =~ ^[0-9]+$ ]] && (( S_VALUE >= 0 && S_VALUE <= 128 )) || fail 'Invalid S4; refusing MTU-unsafe padding rewrite.'
+for i in 1 2 3 4; do
+  grep -qE "^S${i}[[:space:]]*=" "$AWG_CONF" || fail "S${i} missing; inspect config before changing padding."
+done
+log "Aligning S1-S4 with original S4=$S_VALUE (preserving MTU budget)"
 for i in 1 2 3 4; do
   if grep -q "^SERVER_AWG_S${i}=" "$PARAMS"; then
-    sed -i -E "s/^SERVER_AWG_S${i}=.*/SERVER_AWG_S${i}=54/" "$PARAMS"
+    sed -i -E "s/^SERVER_AWG_S${i}=.*/SERVER_AWG_S${i}=$S_VALUE/" "$PARAMS"
   else
-    printf 'SERVER_AWG_S%s=54\n' "$i" >> "$PARAMS"
+    printf 'SERVER_AWG_S%s=%s\n' "$i" "$S_VALUE" >> "$PARAMS"
   fi
-  if grep -qE "^S${i}[[:space:]]*=" "$AWG_CONF"; then
-    sed -i -E "s/^S${i}[[:space:]]*=.*/S${i} = 54/" "$AWG_CONF"
-  else
-    fail "S${i} not found in AWG config; manual inspection required."
-  fi
+  sed -i -E "s/^S${i}[[:space:]]*=.*/S${i} = $S_VALUE/" "$AWG_CONF"
 done
 systemctl enable --now awg-quick@awg0
 systemctl restart awg-quick@awg0
@@ -240,10 +249,12 @@ systemctl is-active --quiet nginx || fail 'nginx inactive'
 # Verify local HTTPS (independent of whether upstream network allows access).
 curl -fsSI --resolve "${PUBLIC_IP}:443:127.0.0.1" "https://${PUBLIC_IP}/" >/dev/null || fail 'HTTPS local check failed'
 # Basic checks, do not mistake these for an external reachability test.
-/root/amneziawg-install.sh --protocol-status
+PROTO_STATUS=$(/root/amneziawg-install.sh --protocol-status)
+printf '%s\n' "$PROTO_STATUS"
+printf '%s\n' "$PROTO_STATUS" | grep -Eq '(^|[^0-9])3\.1([^0-9]|$)' || fail 'AWG 3.1 is not enabled.'
 awg show
-ss -lun | grep -F ":${AWG_PORT}" || fail 'AWG UDP listening socket not found'
-ss -lnt | grep -F '127.0.0.1:8080' || fail 'Panel bind check failed'
+ss -H -lun | awk -v port="$AWG_PORT" '$5 ~ (":" port "$") { found=1 } END { exit !found }' || fail 'AWG UDP listening socket not found'
+ss -H -lnt | awk '$4 ~ /^127\.0\.0\.1:8080$/ { found=1 } END { exit !found }' || fail 'Panel bind check failed'
 systemctl disable awg31-autosetup.service
 rm -f "$CONFIG"
 printf '%s\n' "$UPSTREAM_COMMIT" > "$STATE_DIR/upstream-commit"
