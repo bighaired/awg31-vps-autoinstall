@@ -179,6 +179,9 @@ fi
    -x /usr/local/bin/amneziawg-web &&
    -f /etc/systemd/system/amneziawg-web.service ]] || fail 'Web panel installation incomplete.'
 grep -Fxq 'AWG_WEB_LISTEN=127.0.0.1:8080' /etc/amneziawg-web/env.conf || fail 'Web panel listen address differs from expected localhost bind.'
+grep -Fxq 'AUTH_ENABLED=true' /etc/amneziawg-web/env.conf || fail 'Web panel authentication is not enabled.'
+grep -Fxq "AUTH_USERNAME=$ADMIN_USER" /etc/amneziawg-web/env.conf || fail 'Web panel username differs from requested username.'
+grep -Fxq "AUTH_PASSWORD_HASH=$ADMIN_HASH" /etc/amneziawg-web/env.conf || fail 'Web panel password hash differs from the originally entered password.'
 if grep -q '^AUTH_SECURE_COOKIE=' /etc/amneziawg-web/env.conf; then
   sed -i 's/^AUTH_SECURE_COOKIE=.*/AUTH_SECURE_COOKIE=true/' /etc/amneziawg-web/env.conf
 else
