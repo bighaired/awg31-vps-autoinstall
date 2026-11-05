@@ -143,6 +143,8 @@ Wants=network-online.target
 ConditionPathExists=/var/lib/awg31-autosetup/config
 [Service]
 Type=oneshot
+Environment=HOME=/root
+WorkingDirectory=/root
 ExecStart=/usr/local/sbin/awg31-autosetup --resume
 TimeoutStartSec=0
 [Install]
@@ -155,6 +157,9 @@ UNIT
   exit 0
 fi
 
+# systemd does not reliably supply HOME for oneshot services; rustup needs it.
+export HOME=/root
+export PATH="/root/.cargo/bin:$PATH"
 export DEBIAN_FRONTEND=noninteractive
 # Guard against hosts whose swap was removed before resuming.
 ensure_build_swap
