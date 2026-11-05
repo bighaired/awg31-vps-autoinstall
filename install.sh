@@ -37,6 +37,10 @@ else
     command -v curl >/dev/null 2>&1 || { apt-get update && apt-get install -y curl ca-certificates; }
     PUBLIC_IP=$(curl -fsS4 --max-time 15 https://api.ipify.org) || fail 'IPv4 autodetection failed'
   fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    apt-get update
+    apt-get install -y python3
+  fi
   python3 - "$PUBLIC_IP" <<'PY' || fail 'Invalid public IPv4'
 import ipaddress,sys
 x=ipaddress.ip_address(sys.argv[1]); assert x.version == 4 and x.is_global
@@ -253,7 +257,7 @@ PROTO_STATUS=$(/root/amneziawg-install.sh --protocol-status)
 printf '%s\n' "$PROTO_STATUS"
 printf '%s\n' "$PROTO_STATUS" | grep -Eq '(^|[^0-9])3\.1([^0-9]|$)' || fail 'AWG 3.1 is not enabled.'
 awg show
-ss -H -lun | awk -v port="$AWG_PORT" '$5 ~ (":" port "$") { found=1 } END { exit !found }' || fail 'AWG UDP listening socket not found'
+ss -H -lun | awk -v port="$AWG_PORT" '$4 ~ (":" port "$") { found=1 } END { exit !found }' || fail 'AWG UDP listening socket not found'
 ss -H -lnt | awk '$4 ~ /^127\.0\.0\.1:8080$/ { found=1 } END { exit !found }' || fail 'Panel bind check failed'
 systemctl disable awg31-autosetup.service
 rm -f "$CONFIG"
