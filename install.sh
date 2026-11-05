@@ -68,7 +68,7 @@ ensure_build_swap() {
     swapon "$build_swap"
   fi
   grep -Eq '^[[:space:]]*/var/lib/awg31-autosetup/build[.]swap[[:space:]]' /etc/fstab ||
-    printf '%s none swap sw 0 0\\n' "$build_swap" >> /etc/fstab
+    printf '%s none swap sw 0 0\n' "$build_swap" >> /etc/fstab
   log 'Dedicated build swap enabled; existing swap files preserved'
 }
 
