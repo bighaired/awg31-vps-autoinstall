@@ -24,6 +24,12 @@ class InstallerContract(unittest.TestCase):
         self.assertIn("PasswordHasher().hash", SCRIPT)
         self.assertIn('rm -f "$CONFIG"', SCRIPT)
 
+    def test_panel_readiness_after_restart(self):
+        self.assertIn("PANEL_READY=false", SCRIPT)
+        self.assertIn("for attempt in $(seq 1 30)", SCRIPT)
+        self.assertIn("journalctl -u amneziawg-web -n 35 --no-pager", SCRIPT)
+        self.assertNotIn("Web panel not bound to localhost:8080", SCRIPT)
+
     def test_partial_panel_install_recovery(self):
         self.assertIn('Installing or repairing incomplete web panel', SCRIPT)
         self.assertIn('! -x /usr/local/bin/amneziawg-web', SCRIPT)
