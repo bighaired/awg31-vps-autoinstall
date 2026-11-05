@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Automated fresh-server setup for Ubuntu 24.04: AWG 3.1 + HTTPS web panel.
-# Run locally on VPS as root: bash install-amneziawg31-auto.sh
+# Version 1.1: automated fresh-server setup for Ubuntu 24.04: AWG 3.1 + HTTPS web panel.
+# Run locally on VPS as root: bash install.sh
 set -Eeuo pipefail
 umask 077
 STATE_DIR=/var/lib/awg31-autosetup
@@ -9,10 +9,11 @@ SCRIPT_PATH=/usr/local/sbin/awg31-autosetup
 SERVICE=/etc/systemd/system/awg31-autosetup.service
 LOG=/var/log/awg31-autosetup.log
 REPO=https://github.com/wiresock/awg-server-tools.git
-RAW=https://raw.githubusercontent.com/wiresock/awg-server-tools/main
+# Upstream commit verified 2026-11-05. Update deliberately, never track moving main.
+UPSTREAM_COMMIT=1e0b321f9b481ab21ee68ca709c5ca84ab68041f
 fail(){ echo "ERROR: $*" >&2; exit 1; }
 log(){ echo "[$(date -Is)] $*"; }
-trap 'rc=$?; echo "FAILED at line $LINENO (exit $rc). See $LOG or journalctl -u awg31-autosetup" >&2' ERR
+trap 'rc=$?; echo "FAILED at line $LINENO (exit $rc). See $LOG or journalctl -u awg31-autosetup. Once fixed: systemctl restart awg31-autosetup" >&2' ERR
 [[ $EUID == 0 ]] || fail 'Run as root.'
 . /etc/os-release
 [[ $ID == ubuntu && $VERSION_ID == 24.04 ]] || fail 'Requires Ubuntu 24.04.'
@@ -22,12 +23,14 @@ exec > >(tee -a "$LOG") 2>&1
 
 if [[ ${1:-} == --resume ]]; then
   [[ -f $CONFIG ]] || fail 'Setup config not found.'
+  [[ $(stat -c %a "$CONFIG") == 600 && $(stat -c %u "$CONFIG") == 0 ]] || fail 'Setup config permissions/ownership unsafe.'
   # config is generated only by this script, owned by root, with escaped values.
   source "$CONFIG"
 else
   [[ ! -e $CONFIG ]] || fail "Installation already initialized. Check systemctl status awg31-autosetup."
   [[ ! -e /etc/amnezia/amneziawg/awg0.conf ]] || fail 'Existing AWG installation detected; refusing overwrite.'
   [[ ! -e /etc/amneziawg-web/env.conf ]] || fail 'Existing web panel detected; refusing overwrite.'
+  [[ ! -e /etc/nginx/sites-available/awg31 ]] || fail 'Existing awg31 nginx configuration detected; refusing overwrite.'
   echo '=== New Ubuntu 24.04 VPS: AWG 3.1 + HTTPS Web ==='
   read -r -p 'Public IPv4 (Enter = detect automatically): ' PUBLIC_IP
   if [[ -z $PUBLIC_IP ]]; then
@@ -75,6 +78,7 @@ PY
   } > "$CONFIG"
   chmod 600 "$CONFIG"
   install -m 700 "$(realpath "$0")" "$SCRIPT_PATH"
+  # After reboot, systemd runs the installed copy, not a GitHub checkout.
   cat > "$SERVICE" <<'UNIT'
 [Unit]
 Description=Complete unattended AmneziaWG 3.1 setup after boot
@@ -99,10 +103,19 @@ export DEBIAN_FRONTEND=noninteractive
 log 'Resuming installation after reboot'
 [[ -e /lib/modules/$(uname -r)/build ]] || fail "Headers missing for running kernel $(uname -r)"
 cd /root
-if [[ ! -f /root/amneziawg-install.sh ]]; then
-  curl -fL --retry 3 "$RAW/amneziawg-install.sh" -o /root/amneziawg-install.sh
-  chmod 700 /root/amneziawg-install.sh
+# Freeze both the core installer and panel installer to one reviewed upstream revision.
+if [[ ! -d /opt/awg-server-tools/.git ]]; then
+  [[ ! -e /opt/awg-server-tools ]] || fail 'Non-git /opt/awg-server-tools exists; inspect manually.'
+  mkdir -p /opt/awg-server-tools
+  git -C /opt/awg-server-tools init -q
+  git -C /opt/awg-server-tools remote add origin "$REPO"
+  git -C /opt/awg-server-tools fetch --depth 1 origin "$UPSTREAM_COMMIT"
+  git -C /opt/awg-server-tools checkout -q --detach FETCH_HEAD
 fi
+[[ $(git -C /opt/awg-server-tools rev-parse HEAD) == "$UPSTREAM_COMMIT" ]] || fail 'Upstream checkout SHA mismatch.'
+[[ -f /opt/awg-server-tools/amneziawg-install.sh && -f /opt/awg-server-tools/amneziawg-web.sh ]] || fail 'Pinned upstream files missing.'
+# Deliberately refresh the local lifecycle installer from the pinned checkout.
+install -m 700 /opt/awg-server-tools/amneziawg-install.sh /root/amneziawg-install.sh
 if [[ ! -f /etc/amnezia/amneziawg/awg0.conf ]]; then
   log 'Installing AmneziaWG'
   AUTO_INSTALL=y SERVER_PUB_IP="$PUBLIC_IP" SERVER_PORT="$AWG_PORT" ENABLE_IPV6=n CLIENT_DNS_1=1.1.1.1 CLIENT_DNS_2=1.0.0.1 CREATE_INITIAL_CLIENT=no /root/amneziawg-install.sh
@@ -115,8 +128,8 @@ fi
 PARAMS=/etc/amnezia/amneziawg/params
 AWG_CONF=/etc/amnezia/amneziawg/awg0.conf
 [[ -f $PARAMS && -f $AWG_CONF ]] || fail 'AWG configuration missing.'
-cp -a "$PARAMS" "$PARAMS.pre-autosetup.bak"
-cp -a "$AWG_CONF" "$AWG_CONF.pre-autosetup.bak"
+[[ -e "$PARAMS.pre-autosetup.bak" ]] || cp -a "$PARAMS" "$PARAMS.pre-autosetup.bak"
+[[ -e "$AWG_CONF.pre-autosetup.bak" ]] || cp -a "$AWG_CONF" "$AWG_CONF.pre-autosetup.bak"
 for i in 1 2 3 4; do
   if grep -q "^SERVER_AWG_S${i}=" "$PARAMS"; then
     sed -i -E "s/^SERVER_AWG_S${i}=.*/SERVER_AWG_S${i}=54/" "$PARAMS"
@@ -135,10 +148,7 @@ systemctl is-active --quiet awg-quick@awg0 || fail 'AWG service inactive'
 
 log 'Installing web control panel'
 if [[ ! -f /etc/amneziawg-web/env.conf ]]; then
-  if [[ ! -d /opt/awg-server-tools/.git ]]; then
-    [[ ! -e /opt/awg-server-tools ]] || fail "Existing /opt/awg-server-tools is not a git repository"
-    git clone --depth 1 "$REPO" /opt/awg-server-tools
-  fi
+  # The web installer is sourced from the same pinned checkout as core AWG.
   bash /opt/awg-server-tools/amneziawg-web.sh install \
     --non-interactive --install-rust \
     --source-dir /opt/awg-server-tools/amneziawg-web \
@@ -220,6 +230,10 @@ cat >/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh <<'HOOK'
 /usr/bin/systemctl reload nginx
 HOOK
 chmod 700 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+# Certbot snap normally supplies automatic renewal. Fail closed if its timer is missing.
+if ! systemctl list-timers --all --no-legend | grep -Eq '(snap\.certbot\.renew|certbot\.timer)'; then
+  fail 'Certbot renewal timer not found: configure renewal before publishing the panel.'
+fi
 nginx -t
 systemctl reload nginx
 systemctl is-active --quiet nginx || fail 'nginx inactive'
@@ -232,5 +246,7 @@ ss -lun | grep -F ":${AWG_PORT}" || fail 'AWG UDP listening socket not found'
 ss -lnt | grep -F '127.0.0.1:8080' || fail 'Panel bind check failed'
 systemctl disable awg31-autosetup.service
 rm -f "$CONFIG"
+printf '%s\n' "$UPSTREAM_COMMIT" > "$STATE_DIR/upstream-commit"
+chmod 600 "$STATE_DIR/upstream-commit"
 log "SUCCESS: web panel https://${PUBLIC_IP}/ ; login ${ADMIN_USER}; AWG UDP port ${AWG_PORT}"
 log 'NEXT: confirm provider firewall allows 80/TCP, 443/TCP, AWG UDP, and test client handshake externally.'
