@@ -255,8 +255,22 @@ else
   echo 'AUTH_SECURE_COOKIE=true' >> /etc/amneziawg-web/env.conf
 fi
 systemctl restart amneziawg-web
-systemctl is-active --quiet amneziawg-web || fail 'Web panel inactive'
-ss -lnt | grep -Eq '127\.0\.0\.1:8080[[:space:]]' || fail 'Web panel not bound to localhost:8080'
+# systemctl restart returning does not guarantee socket readiness.
+log 'Waiting for web panel to listen on 127.0.0.1:8080'
+PANEL_READY=false
+for attempt in $(seq 1 30); do
+  if ss -H -lnt | awk '$4 == "127.0.0.1:8080" { found=1 } END { exit !found }'; then
+    PANEL_READY=true
+    break
+  fi
+  systemctl is-active --quiet amneziawg-web || break
+  sleep 1
+done
+if [[ $PANEL_READY != true ]]; then
+  systemctl status amneziawg-web --no-pager || true
+  journalctl -u amneziawg-web -n 35 --no-pager || true
+  fail 'Web panel not listening on localhost:8080 after startup; see service logs above.'
+fi
 
 log 'Configuring nginx ACME HTTP challenge'
 mkdir -p /var/www/html/.well-known/acme-challenge
