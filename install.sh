@@ -13,6 +13,11 @@ REPO=https://github.com/wiresock/awg-server-tools.git
 UPSTREAM_COMMIT=1e0b321f9b481ab21ee68ca709c5ca84ab68041f
 fail(){ echo "ERROR: $*" >&2; exit 1; }
 log(){ echo "[$(date -Is)] $*"; }
+validate_email() {
+  # ACME contact URI must be ASCII; reject Cyrillic input-method accidents.
+  [[ ${EMAIL:-} =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] ||
+    fail 'Invalid ASCII email for Lets Encrypt. Use Latin letters only; correct EMAIL in root-only saved config before resuming.'
+}
 trap 'rc=$?; echo "FAILED at line $LINENO (exit $rc). See $LOG or journalctl -u awg31-autosetup. Once fixed: systemctl restart awg31-autosetup" >&2' ERR
 [[ $EUID == 0 ]] || fail 'Run as root.'
 . /etc/os-release
@@ -77,6 +82,7 @@ if [[ ${1:-} == --resume ]]; then
   [[ $(stat -c %a "$CONFIG") == 600 && $(stat -c %u "$CONFIG") == 0 ]] || fail 'Setup config permissions/ownership unsafe.'
   # config is generated only by this script, owned by root, with escaped values.
   source "$CONFIG"
+  validate_email
 else
   [[ ! -e $CONFIG ]] || fail "Installation already initialized. Check systemctl status awg31-autosetup."
   [[ ! -e /etc/amnezia/amneziawg/awg0.conf ]] || fail 'Existing AWG installation detected; refusing overwrite.'
@@ -100,7 +106,7 @@ PY
   AWG_PORT=${AWG_PORT:-585}
   [[ $AWG_PORT =~ ^[0-9]+$ ]] && ((AWG_PORT>=1 && AWG_PORT<=65535)) || fail 'Invalid UDP port'
   prompt_input EMAIL "Email for Let's Encrypt notices: "
-  [[ $EMAIL == *@*.* ]] || fail 'Valid email required.'
+  validate_email
   prompt_input ADMIN_USER 'Web panel username [admin]: '
   ADMIN_USER=${ADMIN_USER:-admin}
   [[ $ADMIN_USER =~ ^[a-zA-Z0-9_.-]{1,32}$ ]] || fail 'Invalid username'
