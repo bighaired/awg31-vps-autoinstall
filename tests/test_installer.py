@@ -2,6 +2,7 @@
 """Static contract tests; do not execute the root installer in CI."""
 from pathlib import Path
 import re
+import subprocess
 import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1].joinpath("install.sh").read_text()
@@ -29,6 +30,8 @@ class InstallerContract(unittest.TestCase):
         self.assertIn('! -f /etc/systemd/system/amneziawg-web.service', SCRIPT)
         self.assertIn('Web panel installation incomplete.', SCRIPT)
         self.assertIn('AWG_WEB_LISTEN=127.0.0.1:8080', SCRIPT)
+        self.assertIn('AUTH_PASSWORD_HASH=$ADMIN_HASH', SCRIPT)
+        self.assertIn('AUTH_ENABLED=true', SCRIPT)
 
     def test_panel_localhost_and_tls(self):
         self.assertIn('--host 127.0.0.1 --port 8080', SCRIPT)
@@ -47,6 +50,23 @@ class InstallerContract(unittest.TestCase):
         self.assertIn('ss -H -lun | awk -v port="$AWG_PORT"', SCRIPT)
         self.assertIn('ss -H -lnt | awk', SCRIPT)
         self.assertIn('AWG UDP listening socket not found', SCRIPT)
+
+    def test_padding_extraction_samples(self):
+        # Execute the same sed parser on representative generated configs.
+        pattern = r"s/^[[:space:]]*S4[[:space:]]*=[[:space:]]*([0-9]+)[[:space:]]*$/\\1/p"
+        for value in (15, 54, 128):
+            config = f"[Interface]\\nS1 = 55\\nS4 = {value}\\n"
+            out = subprocess.run(["sed", "-nE", pattern], input=config, text=True,
+                                 capture_output=True, check=True)
+            self.assertEqual(out.stdout.strip(), str(value))
+
+    def test_socket_parser_samples(self):
+        # ss -H emits State, Recv-Q, Send-Q, Local Address:Port, Peer Address:Port.
+        cmd = ["awk", "-v", "port=585", '$4 ~ (":" port "$") { found=1 } END { exit !found }']
+        good = "UNCONN 0 0 0.0.0.0:585 0.0.0.0:*\\n"
+        bad = "UNCONN 0 0 0.0.0.0:1585 0.0.0.0:*\\n"
+        self.assertEqual(subprocess.run(cmd, input=good, text=True).returncode, 0)
+        self.assertNotEqual(subprocess.run(cmd, input=bad, text=True).returncode, 0)
 
     def test_protocol_configuration(self):
         self.assertIn('--enable-awg31', SCRIPT)
