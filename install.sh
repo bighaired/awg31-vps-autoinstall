@@ -274,6 +274,9 @@ fi
 
 log 'Configuring nginx ACME HTTP challenge'
 mkdir -p /var/www/html/.well-known/acme-challenge
+# umask 077 makes newly created directories 0700. nginx's unprivileged
+# worker must traverse both directories to serve ACME HTTP-01 challenges.
+chmod 755 /var/www/html/.well-known /var/www/html/.well-known/acme-challenge
 cat >/etc/nginx/sites-available/awg31 <<EOF
 server {
     listen 80 default_server;
