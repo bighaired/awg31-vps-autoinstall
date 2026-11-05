@@ -9,7 +9,7 @@ SCRIPT = Path(__file__).resolve().parents[1].joinpath("install.sh").read_text()
 class InstallerContract(unittest.TestCase):
     def test_pinned_upstream(self):
         self.assertRegex(SCRIPT, r"(?m)^UPSTREAM_COMMIT=[0-9a-f]{40}$")
-        self.assertIn('git -C /opt/awg-server-tools rev-parse HEAD', SCRIPT)
+        self.assertIn('git -C "$UPSTREAM_DIR" rev-parse HEAD', SCRIPT)
         self.assertNotIn("raw.githubusercontent.com/wiresock/awg-server-tools/main/", SCRIPT)
 
     def test_fresh_os_and_root_guard(self):
