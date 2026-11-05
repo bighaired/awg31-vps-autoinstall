@@ -78,6 +78,12 @@ class InstallerContract(unittest.TestCase):
         self.assertIn("prompt_secret ADMIN_PASS 'Web panel password", SCRIPT)
         self.assertIn('Password input interrupted.', SCRIPT)
 
+    def test_systemd_rust_environment(self):
+        self.assertIn('Environment=HOME=/root', SCRIPT)
+        self.assertIn('WorkingDirectory=/root', SCRIPT)
+        self.assertIn('export HOME=/root', SCRIPT)
+        self.assertIn('export PATH="/root/.cargo/bin:$PATH"', SCRIPT)
+
     def test_low_memory_swap(self):
         self.assertIn('ensure_build_swap()', SCRIPT)
         self.assertIn('build_swap="$STATE_DIR/build.swap"', SCRIPT)
