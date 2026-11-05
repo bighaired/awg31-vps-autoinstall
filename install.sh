@@ -43,20 +43,33 @@ prompt_secret() {
 }
 # A 1 GiB VPS needs swap before kernel packages and Rust builds.
 ensure_build_swap() {
-  local mem_kib swap_kib free_kib
+  local mem_kib swap_kib free_kib build_swap
   mem_kib=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
   swap_kib=$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)
   if (( mem_kib >= 1572864 || swap_kib >= 2097152 )); then return 0; fi
-  [[ ! -e /swapfile ]] || fail 'Existing /swapfile detected but swap is insufficient; inspect manually.'
-  free_kib=$(df -Pk / | awk 'NR==2 {print $4}')
-  (( free_kib >= 6291456 )) || fail 'Less than 6 GiB disk space free. Need space for 2 GiB swap and Rust build.'
-  log 'Low RAM detected: creating persistent 2 GiB /swapfile for Rust build'
-  fallocate -l 2G /swapfile
-  chmod 600 /swapfile
-  mkswap /swapfile >/dev/null
-  swapon /swapfile
-  grep -qE '^[[:space:]]*/swapfile[[:space:]]' /etc/fstab || printf '/swapfile none swap sw 0 0\n' >> /etc/fstab
-  log 'Swap enabled and configured for future boots'
+
+  # A fresh VPS can already have its own /swapfile (often just 1 GiB).
+  # Never modify or reformat it. Use an installer-owned swap file instead.
+  build_swap="$STATE_DIR/build.swap"
+  if [[ ! -e "$build_swap" ]]; then
+    free_kib=$(df -Pk "$STATE_DIR" | awk 'NR==2 {print $4}')
+    (( free_kib >= 6291456 )) || fail 'Less than 6 GiB disk space free. Need space for a 2 GiB build swap and Rust compilation.'
+    log 'Low RAM detected: allocating dedicated 2 GiB build swap without touching existing /swapfile'
+  else
+    [[ -f "$build_swap" && ! -L "$build_swap" ]] || fail 'Dedicated build.swap is not a regular file.'
+    [[ $(stat -c %u "$build_swap") == 0 ]] || fail 'Dedicated build.swap must be owned by root.'
+  fi
+  if ! swapon --noheadings --raw --show=NAME | grep -Fxq "$build_swap"; then
+    # Reinitialize only the dedicated (and currently inactive) file.
+    # This is also safe after a previous interrupted fallocate/mkswap.
+    fallocate -l 2G "$build_swap"
+    chmod 600 "$build_swap"
+    mkswap "$build_swap" >/dev/null
+    swapon "$build_swap"
+  fi
+  grep -Eq '^[[:space:]]*/var/lib/awg31-autosetup/build[.]swap[[:space:]]' /etc/fstab ||
+    printf '%s none swap sw 0 0\\n' "$build_swap" >> /etc/fstab
+  log 'Dedicated build swap enabled; existing swap files preserved'
 }
 
 if [[ ${1:-} == --resume ]]; then
