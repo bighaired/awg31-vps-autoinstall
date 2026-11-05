@@ -68,6 +68,19 @@ class InstallerContract(unittest.TestCase):
         self.assertEqual(subprocess.run(cmd, input=good, text=True).returncode, 0)
         self.assertNotEqual(subprocess.run(cmd, input=bad, text=True).returncode, 0)
 
+    def test_interactive_password_prompt(self):
+        self.assertIn('read -r -s -p "$prompt" answer </dev/tty', SCRIPT)
+        self.assertIn("prompt_secret ADMIN_PASS 'Web panel password", SCRIPT)
+        self.assertIn('Password input interrupted.', SCRIPT)
+
+    def test_low_memory_swap(self):
+        self.assertIn('ensure_build_swap()', SCRIPT)
+        self.assertIn('fallocate -l 2G /swapfile', SCRIPT)
+        self.assertIn('chmod 600 /swapfile', SCRIPT)
+        self.assertIn('swapon /swapfile', SCRIPT)
+        self.assertIn('export CARGO_BUILD_JOBS=1', SCRIPT)
+        self.assertIn('Less than 6 GiB disk space free', SCRIPT)
+
     def test_protocol_configuration(self):
         self.assertIn('--enable-awg31', SCRIPT)
         self.assertIn('S_VALUE=$(sed -nE', SCRIPT)
