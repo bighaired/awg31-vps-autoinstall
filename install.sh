@@ -21,6 +21,44 @@ mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
 exec > >(tee -a "$LOG") 2>&1
 
+# Do not depend on inherited stdin for interactive prompts: ssh/terminal clients
+# may close that stream even while the controlling TTY remains available.
+prompt_input() {
+  local name="$1" prompt="$2" answer
+  [[ -r /dev/tty && -w /dev/tty ]] || fail 'No controlling terminal; connect via interactive SSH.'
+  if ! IFS= read -r -p "$prompt" answer </dev/tty; then
+    fail "Input interrupted: $prompt"
+  fi
+  printf -v "$name" '%s' "$answer"
+}
+prompt_secret() {
+  local name="$1" prompt="$2" answer
+  [[ -r /dev/tty && -w /dev/tty ]] || fail 'No controlling terminal; connect via interactive SSH.'
+  if ! IFS= read -r -s -p "$prompt" answer </dev/tty; then
+    printf '\n' >/dev/tty
+    fail 'Password input interrupted. Installation has not started.'
+  fi
+  printf '\n' >/dev/tty
+  printf -v "$name" '%s' "$answer"
+}
+# A 1 GiB VPS needs swap before kernel packages and Rust builds.
+ensure_build_swap() {
+  local mem_kib swap_kib free_kib
+  mem_kib=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+  swap_kib=$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)
+  if (( mem_kib >= 1572864 || swap_kib >= 2097152 )); then return 0; fi
+  [[ ! -e /swapfile ]] || fail 'Existing /swapfile detected but swap is insufficient; inspect manually.'
+  free_kib=$(df -Pk / | awk 'NR==2 {print $4}')
+  (( free_kib >= 6291456 )) || fail 'Less than 6 GiB disk space free. Need space for 2 GiB swap and Rust build.'
+  log 'Low RAM detected: creating persistent 2 GiB /swapfile for Rust build'
+  fallocate -l 2G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile >/dev/null
+  swapon /swapfile
+  grep -qE '^[[:space:]]*/swapfile[[:space:]]' /etc/fstab || printf '/swapfile none swap sw 0 0\n' >> /etc/fstab
+  log 'Swap enabled and configured for future boots'
+}
+
 if [[ ${1:-} == --resume ]]; then
   [[ -f $CONFIG ]] || fail 'Setup config not found.'
   [[ $(stat -c %a "$CONFIG") == 600 && $(stat -c %u "$CONFIG") == 0 ]] || fail 'Setup config permissions/ownership unsafe.'
@@ -32,7 +70,7 @@ else
   [[ ! -e /etc/amneziawg-web/env.conf ]] || fail 'Existing web panel detected; refusing overwrite.'
   [[ ! -e /etc/nginx/sites-available/awg31 ]] || fail 'Existing awg31 nginx configuration detected; refusing overwrite.'
   echo '=== New Ubuntu 24.04 VPS: AWG 3.1 + HTTPS Web ==='
-  read -r -p 'Public IPv4 (Enter = detect automatically): ' PUBLIC_IP
+  prompt_input PUBLIC_IP 'Public IPv4 (Enter = detect automatically): '
   if [[ -z $PUBLIC_IP ]]; then
     command -v curl >/dev/null 2>&1 || { apt-get update && apt-get install -y curl ca-certificates; }
     PUBLIC_IP=$(curl -fsS4 --max-time 15 https://api.ipify.org) || fail 'IPv4 autodetection failed'
@@ -45,24 +83,25 @@ else
 import ipaddress,sys
 x=ipaddress.ip_address(sys.argv[1]); assert x.version == 4 and x.is_global
 PY
-  read -r -p 'AmneziaWG UDP port [585]: ' AWG_PORT
+  prompt_input AWG_PORT 'AmneziaWG UDP port [585]: '
   AWG_PORT=${AWG_PORT:-585}
   [[ $AWG_PORT =~ ^[0-9]+$ ]] && ((AWG_PORT>=1 && AWG_PORT<=65535)) || fail 'Invalid UDP port'
-  read -r -p "Email for Let's Encrypt notices: " EMAIL
+  prompt_input EMAIL "Email for Let's Encrypt notices: "
   [[ $EMAIL == *@*.* ]] || fail 'Valid email required.'
-  read -r -p 'Web panel username [admin]: ' ADMIN_USER
+  prompt_input ADMIN_USER 'Web panel username [admin]: '
   ADMIN_USER=${ADMIN_USER:-admin}
   [[ $ADMIN_USER =~ ^[a-zA-Z0-9_.-]{1,32}$ ]] || fail 'Invalid username'
-  read -r -s -p 'Web panel password (min 16 characters): ' ADMIN_PASS; echo
+  prompt_secret ADMIN_PASS 'Web panel password (min 16 characters): '
   [[ ${#ADMIN_PASS} -ge 16 ]] || fail 'Password too short.'
-  read -r -s -p 'Repeat password: ' ADMIN_PASS_2; echo
+  prompt_secret ADMIN_PASS_2 'Repeat password: '
   [[ $ADMIN_PASS == "$ADMIN_PASS_2" ]] || fail 'Passwords do not match.'
   unset ADMIN_PASS_2
   echo 'Ports required at your hosting provider: 22/TCP, 80/TCP, 443/TCP and the chosen AWG UDP port.'
   echo 'The script cannot change the external provider firewall or prove UDP accessibility from Russia.'
-  read -r -p 'Start unattended installation, including an automatic reboot? [y/N]: ' CONFIRM
+  prompt_input CONFIRM 'Start unattended installation, including an automatic reboot? [y/N]: '
   [[ $CONFIRM == y || $CONFIRM == Y ]] || exit 0
   export DEBIAN_FRONTEND=noninteractive
+  ensure_build_swap
   log 'Installing prerequisites and new kernel/header packages'
   apt-get update
   apt-get install -y linux-image-generic linux-headers-generic curl ca-certificates git build-essential libc6-dev pkg-config libssl-dev python3-argon2 zstd python3 nginx snapd tcpdump
@@ -104,6 +143,10 @@ UNIT
 fi
 
 export DEBIAN_FRONTEND=noninteractive
+# Guard against hosts whose swap was removed before resuming.
+ensure_build_swap
+export CARGO_BUILD_JOBS=1
+export CARGO_INCREMENTAL=0
 log 'Resuming installation after reboot'
 [[ -e /lib/modules/$(uname -r)/build ]] || fail "Headers missing for running kernel $(uname -r)"
 cd /root
