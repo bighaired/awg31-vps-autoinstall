@@ -68,6 +68,11 @@ class InstallerContract(unittest.TestCase):
         self.assertEqual(subprocess.run(cmd, input=good, text=True).returncode, 0)
         self.assertNotEqual(subprocess.run(cmd, input=bad, text=True).returncode, 0)
 
+    def test_password_min_length(self):
+        self.assertIn('Web panel password (min 6 characters): ', SCRIPT)
+        self.assertIn('[[ ${#ADMIN_PASS} -ge 6 ]]', SCRIPT)
+        self.assertNotIn('[[ ${#ADMIN_PASS} -ge 16 ]]', SCRIPT)
+
     def test_interactive_password_prompt(self):
         self.assertIn('read -r -s -p "$prompt" answer </dev/tty', SCRIPT)
         self.assertIn("prompt_secret ADMIN_PASS 'Web panel password", SCRIPT)
