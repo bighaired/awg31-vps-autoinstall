@@ -29,9 +29,22 @@ class InstallerContract(unittest.TestCase):
         self.assertIn('--ip-address "$PUBLIC_IP"', SCRIPT)
         self.assertIn('proxy_pass http://127.0.0.1:8080;', SCRIPT)
 
+    def test_interrupted_fetch_recovery(self):
+        self.assertIn("Fetching pinned upstream commit (safe to retry)", SCRIPT)
+        self.assertIn('git -C "$UPSTREAM_DIR" fetch --depth 1', SCRIPT)
+        self.assertIn('Unexpected upstream origin URL', SCRIPT)
+
+    def test_listener_socket_checks(self):
+        self.assertIn('ss -H -lun | awk -v port="$AWG_PORT"', SCRIPT)
+        self.assertIn('ss -H -lnt | awk', SCRIPT)
+        self.assertIn('AWG UDP listening socket not found', SCRIPT)
+
     def test_protocol_configuration(self):
         self.assertIn('--enable-awg31', SCRIPT)
-        self.assertIn('SERVER_AWG_S${i}=54', SCRIPT)
+        self.assertIn('S_VALUE=$(sed -nE', SCRIPT)
+        self.assertIn('SERVER_AWG_S${i}=$S_VALUE', SCRIPT)
+        self.assertIn('preserving MTU budget', SCRIPT)
+        self.assertNotIn('SERVER_AWG_S${i}=54', SCRIPT)
         self.assertIn('systemctl is-active --quiet awg-quick@awg0', SCRIPT)
 
 if __name__ == "__main__":
